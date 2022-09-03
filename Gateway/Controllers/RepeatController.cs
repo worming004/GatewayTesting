@@ -6,18 +6,19 @@ namespace Gateway.Controllers;
 [Route("[controller]")]
 public class RepeatController : ControllerBase
 {
-    private readonly HttpClient httpClient;
+    private readonly IHttpClientFactory httpClientFactory;
 
-    public RepeatController(HttpClient httpClient)
+    public RepeatController(IHttpClientFactory httpClientFactory)
     {
-        this.httpClient = httpClient;
+        this.httpClientFactory = httpClientFactory;
     }
 
-    [HttpGet("/")]
+    [HttpGet]
     public async Task<IActionResult> Get()
     {
+        var httpClient = httpClientFactory.CreateClient("SubService");
         var result = await httpClient.GetAsync("");
-        var body = result.Content.ReadAsStringAsync();
+        var body = await result.Content.ReadAsStringAsync();
         if (result.IsSuccessStatusCode)
         {
             return Ok(body);
