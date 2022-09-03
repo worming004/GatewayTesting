@@ -7,6 +7,7 @@ namespace Gateway.Controllers;
 public class RepeatController : ControllerBase
 {
     private readonly IHttpClientFactory httpClientFactory;
+    public static string OptionalKey = "optionalKey";
 
     public RepeatController(IHttpClientFactory httpClientFactory)
     {
@@ -14,10 +15,10 @@ public class RepeatController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> Get()
+    public async Task<IActionResult> Get([FromQuery]string optionalKey)
     {
         var httpClient = httpClientFactory.CreateClient("SubService");
-        var result = await httpClient.GetAsync("");
+        var result = await httpClient.GetAsync("" + (!string.IsNullOrEmpty(optionalKey) ? $"?{OptionalKey}={optionalKey}" : ""));
         var body = await result.Content.ReadAsStringAsync();
         if (result.IsSuccessStatusCode)
         {

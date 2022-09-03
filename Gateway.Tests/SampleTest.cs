@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Gateway.Controllers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -18,42 +19,66 @@ public class UnitTest1
     [Fact]
     public async Task ObserveHttpMock()
     {
-        var gateway = Program.GetApp(new string[0]);
-        var cancelAllHosts = new CancellationTokenSource();
-        var gatewayIsReady = false;
-        gateway.Lifetime.ApplicationStarted.Register(() => gatewayIsReady = true);
-        gateway.RunAsync(cancelAllHosts.Token);
-        while (!gatewayIsReady)
-        {
-            await Task.Delay(1000);
-        }
+        // arrange
+        // run real app, the gateway
+        var gatewayHost = Program.GetApp(new string[0]);
+        await RunApplicationHost(gatewayHost);
 
-        var expectedString = "Yo mama, i am the request from the mock http server";
-        var testHost = BuildHttpServer(async (ctx, next) =>
+        // run and setup mock server
+        var expectedResultString = "Yo mama, i am the request from the mock http server";
+        var expectedValueFromQueryString = "fromQueryString";
+        string receivedValueFromQueryString = null;
+        var testHost = BuildHttpServerWithMiddleware(async (ctx, next) =>
         {
-            await ctx.Response.WriteAsync(expectedString);
+            receivedValueFromQueryString = ctx.Request.Query[RepeatController.OptionalKey];
+            await ctx.Response.WriteAsync(expectedResultString);
         });
-        var testHostIsReady = false;
-        var testHostApplicationLifeTime = testHost.Services.GetService(typeof(IHostApplicationLifetime)) as IHostApplicationLifetime;
-        testHostApplicationLifeTime.ApplicationStarted.Register(() => testHostIsReady = true);
-        testHost.RunAsync(cancelAllHosts.Token);
-        while (!gatewayIsReady)
-        {
-            await Task.Delay(1000);
-        }
+        await RunMockHost(testHost);
 
-        var client = new HttpClient ();
-//        var client = new HttpClient {BaseAddress = new Uri("http://localhost:5289")};
-        var response = await client.GetAsync("http://localhost:5289/Repeat");
+        // act
+        var client = new HttpClient {BaseAddress = new Uri("http://localhost:5289")};
+        var response = await client.GetAsync($"/Repeat?{RepeatController.OptionalKey}={expectedValueFromQueryString}");
+        
+        // assert
         response.EnsureSuccessStatusCode();
-        var responseBody = await response.Content.ReadAsStringAsync();
-        Assert.Equal(expectedString, responseBody);
+        var responseStringBody = await response.Content.ReadAsStringAsync();
+        // ensure that gateway answered exactly like the mock middleware
+        Assert.Equal(expectedResultString, responseStringBody);
+        // ensure that mock server received the expected query string
+        Assert.Equal(expectedValueFromQueryString, receivedValueFromQueryString);
 
+        // teardown
         await testHost.StopAsync();
-        await gateway.StopAsync();
+        await gatewayHost.StopAsync();
     }
 
-    private IHost? BuildHttpServer(Func<HttpContext, RequestDelegate, Task> middleware)
+    private static async Task RunMockHost(IHost? mockHost)
+    {
+        var mockHostIsReady = false;
+        var mockHostApplicationLifeTime =
+            mockHost.Services.GetService(typeof(IHostApplicationLifetime)) as IHostApplicationLifetime;
+        mockHostApplicationLifeTime.ApplicationStarted.Register(() => mockHostIsReady = true);
+        mockHost.RunAsync();
+        await WaitForReady(mockHostIsReady);
+    }
+
+    private static async Task RunApplicationHost(WebApplication gateway)
+    {
+        var gatewayIsReady = false;
+        gateway.Lifetime.ApplicationStarted.Register(() => gatewayIsReady = true);
+        gateway.RunAsync();
+        await WaitForReady(gatewayIsReady);
+    }
+
+    private static async Task WaitForReady(bool gatewayIsReady)
+    {
+        while (!gatewayIsReady)
+        {
+            await Task.Delay(1000);
+        }
+    }
+
+    private IHost BuildHttpServerWithMiddleware(Func<HttpContext, RequestDelegate, Task> middleware)
     {
         var builder = Host.CreateDefaultBuilder(new string[0]);
         builder.ConfigureWebHostDefaults(bui =>
